@@ -611,31 +611,39 @@ async function processSignal(config: Config, state: State, signal: Signal) {
   return openTrade(config, state, signal);
 }
 
-async function getPortfolioSignals(config: Config): Promise<Signal[]> {
+async function getPortfolioSignals(config: Config): Promise<{
+  signals: Signal[];
+  successfulPortfolioIds: Set<string>;
+}> {
   const observedAt = Date.now();
   const portfolioIds = Object.entries(config.traders)
     .filter(([, rules]) => rules.enabled)
     .map(([portfolioId]) => portfolioId);
   const signals: Signal[] = [];
+  const successfulPortfolioIds = new Set<string>();
   // Keep concurrency low; Invo occasionally drops bursts of portfolio calls.
   for (let index = 0; index < portfolioIds.length; index += 2) {
     const batch = portfolioIds.slice(index, index + 2);
     const results = await Promise.allSettled(batch.map(async portfolioId => {
       const data = await invo.getPortfolioInvestments(portfolioId, true, 1, 100);
+      if (data.success !== true) throw new Error(`Invo returned unsuccessful portfolio response: ${JSON.stringify(data.error)}`);
       const investments = Array.isArray(data.investmentsTicker) ? data.investmentsTicker : [];
       return investments
         .map((investment: any) => parsePortfolioInvestment(investment, observedAt))
         .filter((signal: Signal | null): signal is Signal => signal !== null);
     }));
     results.forEach((result, batchIndex) => {
-      if (result.status === 'fulfilled') signals.push(...result.value);
+      if (result.status === 'fulfilled') {
+        successfulPortfolioIds.add(batch[batchIndex]);
+        signals.push(...result.value);
+      }
       else log('portfolio_poll_error', {
         portfolioId: batch[batchIndex],
         error: String(result.reason?.message ?? result.reason),
       });
     });
   }
-  return signals;
+  return { signals, successfulPortfolioIds };
 }
 
 async function main() {
@@ -652,18 +660,49 @@ async function main() {
   const state = await loadState();
   let consecutivePollErrors = 0;
   let lastHeartbeatAt = 0;
+  const missingOpenCounts = new Map<string, number>();
   log('daemon_started', { dryRun: config.dryRun, pollIntervalMs: config.pollIntervalMs, traders: Object.values(config.traders).filter(t => t.enabled).length });
 
   while (!stopping) {
     const startedAt = Date.now();
     try {
       if (!config.dryRun && config.protectiveOrdersEnabled) await reconcileProtectiveOrders(state);
-      const [data, portfolioSignals] = await Promise.all([
+      const [data, portfolioSnapshot] = await Promise.all([
         invo.getFeed('following', null, 50),
         getPortfolioSignals(config),
       ]);
       const feedSignals = (data.items ?? []).map(parseSignal).filter((signal: Signal | null): signal is Signal => signal !== null);
-      const parsedSignals = [...feedSignals, ...portfolioSignals];
+      const snapshotOpenBaseIds = new Set(portfolioSnapshot.signals.map(signal => signal.sourceBaseId));
+      const snapshotCloseSignals: Signal[] = [];
+      for (const trade of Object.values(state.trades)) {
+        if (trade.status !== 'open' || !portfolioSnapshot.successfulPortfolioIds.has(trade.portfolioId)) continue;
+        if (snapshotOpenBaseIds.has(trade.sourceBaseId)) {
+          missingOpenCounts.delete(trade.sourceBaseId);
+          continue;
+        }
+        const missingCount = (missingOpenCounts.get(trade.sourceBaseId) ?? 0) + 1;
+        missingOpenCounts.set(trade.sourceBaseId, missingCount);
+        if (missingCount < 2) continue;
+        const observedAt = Date.now();
+        const updatedAt = new Date(observedAt).toISOString();
+        snapshotCloseSignals.push({
+          key: `${trade.sourceBaseId}:${updatedAt}:false:${trade.leverage}:0:0`,
+          postId: trade.postId,
+          isOpen: false,
+          timestamp: observedAt,
+          portfolioId: trade.portfolioId,
+          ownerId: '',
+          coin: trade.coin,
+          side: trade.side,
+          leverage: trade.leverage,
+          positionSize: 0,
+          updatedAt,
+          sourceBaseId: trade.sourceBaseId,
+          sourceBaseShortId: trade.sourceBaseShortId,
+        });
+        missingOpenCounts.delete(trade.sourceBaseId);
+      }
+      const parsedSignals = [...feedSignals, ...portfolioSnapshot.signals, ...snapshotCloseSignals];
       // A feed item is mutable. If several versions are returned together, act
       // only on the latest target state for each source trade.
       const latestByBaseId = new Map<string, Signal>();

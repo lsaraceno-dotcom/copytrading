@@ -100,6 +100,68 @@ All commands run via `npx tsx src/commands/<cmd>.ts`.
 | `trade.ts` | Open a position | `npx tsx src/commands/trade.ts SOL long 0.14 5` |
 | `close.ts` | Close a position | `npx tsx src/commands/close.ts SOL [baseShortId]` |
 
+## Headless deterministic daemon
+
+`daemon.ts` removes the AI review step. It polls the following feed every five
+seconds, accepts signals only from configured portfolio IDs, applies fixed risk
+limits, executes opens and closes, and persists deduplication and copied-trade
+allocations in `data/trader-state.json`.
+
+Trade updates are reconciled as target state. The daemon versions updates by
+the source trade ID and update timestamp, mirrors source size changes
+proportionally, applies leverage changes, and replaces TP/SL trigger orders.
+Exchange-side TP/SL orders are reduce-only and tracked by client order ID. When
+one triggers, its sibling is canceled and the source trade is ignored until it
+closes, preventing an accidental re-entry.
+
+Sizing mode can be `sourceAllocation`, which interprets Invo's `entrySize` as
+the percentage shown as **Size** on the source trade and applies that percentage
+to local equity, or `fixedBalanceFraction`, which uses `balanceFraction` from
+the default/per-trader rules. Source allocations outside `(0, 100]` are
+rejected. Global position and exposure caps still apply in either mode.
+When a calculated opening notional is below `minOpenNotionalUsd`, the daemon
+rounds the asset quantity up just enough to meet that configured minimum. The
+event includes `minimumApplied`, the proportional notional, and the final
+notional so this intentional over-allocation is visible.
+
+```bash
+cp trader-config.example.json trader-config.json
+# Add one or more real Invo portfolio IDs and review every risk limit.
+npm run daemon
+```
+
+The example starts with `dryRun: true` and `tradingEnabled: false`. Run it in
+dry-run mode first. Live orders require both `dryRun: false` and
+`tradingEnabled: true`, which prevents a single accidental setting change from
+enabling execution.
+
+`protectiveOrdersEnabled` controls live TP/SL placement. Validate reduce-only
+agent signing and trigger behavior with a minimal test position before enabling
+live trading; dry-run mode records the intended TP/SL without placing orders.
+
+Add as many portfolios as needed under `traders`. Each can override the default
+risk rules:
+
+```json
+"traders": {
+  "portfolio-id-one": {
+    "enabled": true,
+    "sizeMultiplier": 1
+  },
+  "portfolio-id-two": {
+    "enabled": true,
+    "sizeMultiplier": 0.5,
+    "maxLeverage": 3,
+    "maxPositionUsd": 50
+  }
+}
+```
+
+Hyperliquid holds one net position per coin. The daemon permits multiple copied
+allocations in the same direction and tracks their sizes independently. It
+rejects a new allocation when the existing local position for that coin is in
+the opposite direction.
+
 ## Signal Detection
 
 The monitor watches the Invo social feed for verified trade signals from followed traders. Each signal contains:

@@ -1,10 +1,17 @@
 {
+  "scripts": {
+    "build": "tsc",
+    "daemon": "tsx src/daemon.ts",
+    "positions": "tsx src/commands/positions.ts",
+    "start": "node dist/daemon.js",
+    "check": "tsc --noEmit"
+  },
   "dependencies": {
+    "dotenv": "^17.4.1",
     "hyperliquid": "^1.7.7"
   },
   "devDependencies": {
     "@types/node": "^25.5.2",
-    "dotenv": "^17.4.1",
     "tsx": "^4.21.0",
     "typescript": "^6.0.2"
   }

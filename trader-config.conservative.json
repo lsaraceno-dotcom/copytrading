@@ -1,0 +1,45 @@
+{
+  "pollIntervalMs": 5000,
+  "dryRun": false,
+  "tradingEnabled": true,
+  "allowedCoins": ["*"],
+  "maxOpenTrades": 1,
+  "maxTotalExposureUsd": 15,
+  "maxSignalAgeMs": 30000,
+  "minOpenNotionalUsd": 10,
+  "protectiveOrdersEnabled": true,
+  "sizingMode": "sourceAllocation",
+  "defaultRules": {
+    "maxLeverage": 5,
+    "balanceFraction": 0.05,
+    "maxPositionUsd": 15,
+    "maxPriceDriftPct": 0.01,
+    "copyIncreases": false
+  },
+  "traders": {
+    "942e1290-f2dd-4269-baee-25a1d2f9fe06": {
+      "enabled": true,
+      "sizeMultiplier": 1
+    },
+    "a11bef60-f4d0-448c-9c67-184a2bed7528": {
+      "enabled": true,
+      "sizeMultiplier": 1
+    },
+    "add098a5-636a-4686-b2e5-2783c6a4736f": {
+      "enabled": true,
+      "sizeMultiplier": 1
+    },
+    "f392d602-4882-40bc-8198-6d681943284d": {
+      "enabled": true,
+      "sizeMultiplier": 1
+    },
+    "1c4f8dfd-3e4c-4378-b6fd-a0f694c10fd3": {
+      "enabled": true,
+      "sizeMultiplier": 1
+    },
+    "b9a36eab-df04-4a33-ace5-2b8f7e854d99": {
+      "enabled": true,
+      "sizeMultiplier": 1
+    }
+  }
+}

@@ -64,6 +64,7 @@ export async function placeMarketOrder(
   isBuy: boolean,
   size: string,
   slippagePct = 0.02,
+  reduceOnly = false,
 ) {
   const mids = await getAllMids();
   const mid = parseFloat(mids[coin]);
@@ -79,7 +80,7 @@ export async function placeMarketOrder(
     sz: parseFloat(size),
     limit_px: parseFloat(limitPx),
     order_type: { limit: { tif: 'Ioc' } },
-    reduce_only: false,
+    reduce_only: reduceOnly,
     grouping: 'na',
     builder: INVO_BUILDER,
   });
@@ -94,7 +95,65 @@ export async function closePosition(coin: string, wallet: string) {
   const isLong = parseFloat(pos.szi) > 0;
 
   // Close = opposite direction
-  return placeMarketOrder(coin, !isLong, size.toString(), 0.02);
+  return placeMarketOrder(coin, !isLong, size.toString(), 0.02, true);
+}
+
+/** Close only a known allocation of a net Hyperliquid position. */
+export async function closePositionSize(
+  coin: string,
+  wallet: string,
+  requestedSize: string,
+  expectedSide: 'long' | 'short',
+) {
+  const positions = await getPositions(wallet);
+  const pos = positions.find((p: any) => p.coin === coin);
+  if (!pos) throw new Error(`No open position for ${coin}`);
+
+  const currentSize = Math.abs(parseFloat(pos.szi));
+  const allocationSize = Math.abs(parseFloat(requestedSize));
+  if (!Number.isFinite(allocationSize) || allocationSize <= 0) {
+    throw new Error(`Invalid close size: ${requestedSize}`);
+  }
+
+  // Never submit more than the current net position. This SDK configuration
+  // cannot sign reduce-only orders, so capping is an important last guard.
+  const size = Math.min(currentSize, allocationSize);
+  const isLong = parseFloat(pos.szi) > 0;
+  if (isLong !== (expectedSide === 'long')) {
+    throw new Error(`Local ${coin} position direction no longer matches copied allocation`);
+  }
+  return placeMarketOrder(coin, !isLong, size.toString(), 0.02, true);
+}
+
+export async function placeProtectiveOrder(
+  coin: string,
+  side: 'long' | 'short',
+  size: string,
+  triggerPrice: number,
+  type: 'tp' | 'sl',
+  cloid: string,
+) {
+  if (!Number.isFinite(triggerPrice) || triggerPrice <= 0) throw new Error(`Invalid trigger price: ${triggerPrice}`);
+  const triggerPx = parseFloat(triggerPrice.toPrecision(5));
+  return getSdk().exchange.placeOrder({
+    coin: toSdkCoin(coin),
+    is_buy: side === 'short',
+    sz: parseFloat(size),
+    limit_px: triggerPx,
+    order_type: { trigger: { triggerPx, isMarket: true, tpsl: type } },
+    reduce_only: true,
+    cloid,
+    grouping: 'na',
+    builder: INVO_BUILDER,
+  });
+}
+
+export async function cancelOrderByCloid(coin: string, cloid: string) {
+  return getSdk().exchange.cancelOrderByCloid(toSdkCoin(coin), cloid);
+}
+
+export async function getOrderStatus(wallet: string, cloid: string) {
+  return getSdk().info.getOrderStatus(wallet, cloid, true);
 }
 
 export { INVO_BUILDER };

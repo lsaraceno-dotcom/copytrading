@@ -49,18 +49,32 @@ export async function ensureToken(): Promise<void> {
   if (!ok && !token) throw new Error('No valid Invo token and refresh failed');
 }
 
-async function post(path: string, body: any, retried = false): Promise<any> {
+function retryDelay(ms: number) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function post(path: string, body: any, authRetried = false, networkAttempt = 0): Promise<any> {
   await ensureToken();
-  const resp = await fetch(`${BASE}${path}`, {
-    method: 'POST',
-    headers: {
-      Authorization: token,
-      'Content-Type': 'application/json',
-      'x-app-version': '0.0.75',
-      'x-platform': 'web',
-    },
-    body: JSON.stringify(body),
-  });
+  let resp: Response;
+  try {
+    resp = await fetch(`${BASE}${path}`, {
+      method: 'POST',
+      headers: {
+        Authorization: token,
+        'Content-Type': 'application/json',
+        'x-app-version': '0.0.75',
+        'x-platform': 'web',
+      },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(10_000),
+    });
+  } catch (error) {
+    if (networkAttempt < 2) {
+      await retryDelay(networkAttempt === 0 ? 250 : 750);
+      return post(path, body, authRetried, networkAttempt + 1);
+    }
+    throw error;
+  }
   const text = await resp.text();
   let data: any;
   try {
@@ -70,9 +84,13 @@ async function post(path: string, body: any, retried = false): Promise<any> {
     try { data = JSON.parse(atob(text)); } catch { data = text; }
   }
   // Auto-retry on 401 with refreshed token
-  if (resp.status === 401 && !retried) {
+  if (resp.status === 401 && !authRetried) {
     const ok = await refreshAccessToken();
-    if (ok) return post(path, body, true);
+    if (ok) return post(path, body, true, networkAttempt);
+  }
+  if ((resp.status === 429 || resp.status >= 500) && networkAttempt < 2) {
+    await retryDelay(networkAttempt === 0 ? 250 : 750);
+    return post(path, body, authRetried, networkAttempt + 1);
   }
   if (resp.status >= 400) {
     throw new Error(`Invo ${path} ${resp.status}: ${JSON.stringify(data)}`);
@@ -108,6 +126,15 @@ export async function getFeed(filter: string, lastPostId: string | null = null, 
   return post('/v1_0/posts/get_feed', {
     filter: { filter, assetTypes: [] },
     params: { lastPostId, itemLimit },
+  });
+}
+
+/** Fetch the authoritative trades shown on an Invo portfolio page. */
+export async function getPortfolioInvestments(portfolioId: string, isOpen: boolean, page = 1, size = 100) {
+  return post('/v1_0/investments/get_investments', {
+    portfolioId,
+    isOpen,
+    params: { page, size },
   });
 }
 

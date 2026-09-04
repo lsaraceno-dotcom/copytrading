@@ -1,0 +1,25 @@
+{
+  "pollIntervalMs": 5000,
+  "dryRun": true,
+  "tradingEnabled": false,
+  "allowedCoins": ["BTC", "ETH", "SOL"],
+  "maxOpenTrades": 3,
+  "maxTotalExposureUsd": 300,
+  "maxSignalAgeMs": 30000,
+  "minOpenNotionalUsd": 10,
+  "protectiveOrdersEnabled": true,
+  "sizingMode": "fixedBalanceFraction",
+  "defaultRules": {
+    "maxLeverage": 5,
+    "balanceFraction": 0.05,
+    "maxPositionUsd": 100,
+    "maxPriceDriftPct": 0.02,
+    "copyIncreases": false
+  },
+  "traders": {
+    "REPLACE_WITH_PORTFOLIO_ID": {
+      "enabled": true,
+      "sizeMultiplier": 1
+    }
+  }
+}

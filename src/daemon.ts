@@ -553,7 +553,19 @@ async function closeTrade(config: Config, state: State, signal: Signal) {
     const assetIndex = meta.universe.findIndex(asset => asset.name === trade.coin);
     const positions = await hl.getPositions(WALLET_ADDRESS);
     const qtyBefore = positions.find((p: any) => p.coin === trade.coin)?.szi;
-    if (!qtyBefore) throw new Error(`No local ${trade.coin} position to close`);
+    if (!qtyBefore || Number(qtyBefore) === 0) {
+      trade.status = 'closed';
+      trade.closedAt = new Date().toISOString();
+      state.signals[signal.key] = { status: 'executed', at: new Date().toISOString() };
+      await saveState(state);
+      log('close_already_flat', {
+        signal: signal.key,
+        coin: trade.coin,
+        size: trade.size,
+        reason: 'position was closed outside the daemon',
+      });
+      return;
+    }
     const nonceMs = Date.now();
     const closeResult = await hl.closePositionSize(trade.coin, WALLET_ADDRESS, trade.size, trade.side);
     const after = await hl.getPositions(WALLET_ADDRESS);
